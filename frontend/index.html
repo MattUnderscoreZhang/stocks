@@ -53,6 +53,11 @@
         <h1>Stock Options Visualizer</h1>
         <div class="input-group">
             <input type="text" id="stockSymbol" placeholder="Enter stock symbol (e.g., NVDA)" value="NVDA">
+            <select id="plotType" style="padding: 8px; font-size: 16px; border: 1px solid #ddd; border-radius: 4px; margin-right: 10px;">
+                <option value="call">Call Options</option>
+                <option value="put">Put Options</option>
+                <option value="total">Call + Put</option>
+            </select>
             <button id="fetchButton" onclick="fetchData()">Fetch Data</button>
         </div>
         <div id="status" style="margin: 10px 0; font-weight: bold;"></div>

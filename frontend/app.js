@@ -14,6 +14,7 @@ async function fetchData() {
         if (response.ok) {
             statusDiv.textContent = 'Data loaded successfully!';
             statusDiv.style.color = 'green';
+            storeLastData(data);
             createPlots(data);
         } else {
             if (response.status === 429) {
@@ -34,58 +35,104 @@ async function fetchData() {
 
 function createPlots(data) {
     const { options_data, spot_price } = data;
+    const plotType = document.getElementById('plotType').value;
     
-    // Extract unique expiry dates and strike prices
-    const expiries = [...new Set(options_data.map(d => d.expiry))];
-    const strikes = [...new Set(options_data.map(d => d.strike))];
-    
-    // Create 2D arrays for the heatmaps
-    const callPrices = createPriceMatrix(options_data, expiries, strikes, 'call_price');
-    const putPrices = createPriceMatrix(options_data, expiries, strikes, 'put_price');
-    const totalPrices = createPriceMatrix(options_data, expiries, strikes, 'total_price');
-    
-    const plots = [
-        { z: callPrices, title: 'Call Option Prices' },
-        { z: putPrices, title: 'Put Option Prices' },
-        { z: totalPrices, title: 'Combined Option Prices' }
-    ];
-    
-    const layout = {
-        grid: {rows: 2, columns: 2, pattern: 'independent'},
-        height: 800,
-    };
-    
-    plots.forEach((plot, index) => {
-        const heatmap = {
-            type: 'heatmap',
-            x: expiries,
-            y: strikes,
-            z: plot.z,
-            colorscale: 'Viridis',
-            hoverongaps: false,
-            hovertemplate: 
-                'Expiry: %{x}<br>' +
-                'Strike: $%{y}<br>' +
-                'Price: $%{z:.2f}<br>' +
-                '<extra></extra>'
-        };
-        
-        const subplotLayout = {
-            title: plot.title,
-            xaxis: { title: 'Expiration Date' },
-            yaxis: { title: 'Strike Price ($)' },
-            annotations: [{
-                x: 0.5,
-                y: 1.1,
-                xref: 'paper',
-                yref: 'paper',
-                text: `Current Stock Price: $${spot_price.toFixed(2)}`,
-                showarrow: false
-            }]
-        };
-        
-        Plotly.newPlot(`plotArea${index}`, [heatmap], subplotLayout);
+    // Group data by expiry dates
+    const expiryData = {};
+    options_data.forEach(d => {
+        if (!expiryData[d.expiry]) {
+            expiryData[d.expiry] = [];
+        }
+        expiryData[d.expiry].push(d);
     });
+
+    // Create traces for each expiry date
+    const traces = Object.entries(expiryData).map(([expiry, data], index) => {
+        const priceKey = plotType === 'call' ? 'call_price' : 
+                        plotType === 'put' ? 'put_price' : 'total_price';
+        
+        // Filter out null values and create points array
+        const points = data
+            .filter(d => {
+                const isValid = d[priceKey] !== null && !isNaN(d[priceKey]);
+                if (!isValid) {
+                    console.log('Filtered out point:', d);
+                }
+                return isValid;
+            })
+            .map(d => ({
+                x: d[priceKey],
+                y: d.strike
+            }))
+            .sort((a, b) => a.y - b.y); // Sort by strike price
+        
+        console.log(`Found ${points.length} valid points for ${expiry}`);
+        
+        return {
+            x: points.map(p => p.x),
+            y: points.map(p => p.y),
+            mode: 'markers+lines',
+            type: 'scatter',
+            name: expiry,
+            marker: {
+                size: 8
+            },
+            line: {
+                shape: 'spline',  // Smooth the line
+                smoothing: 0.3
+            }
+        };
+    });
+
+    // Add vertical line at spot price
+    traces.push({
+        x: [0, Math.max(...options_data.map(d => {
+            const price = plotType === 'call' ? d.call_price : 
+                         plotType === 'put' ? d.put_price : d.total_price;
+            return price * 1.2; // Extend line 20% beyond max price
+        }))],
+        y: [spot_price, spot_price],
+        mode: 'lines',
+        line: {
+            dash: 'dash',
+            color: 'gray'
+        },
+        name: 'Current Price'
+    });
+    
+    const plotTitle = plotType === 'call' ? 'Call Option Prices' : 
+                      plotType === 'put' ? 'Put Option Prices' : 'Combined Option Prices';
+
+    const layout = {
+        title: plotTitle,
+        xaxis: {
+            title: 'Premium ($)',
+            zeroline: true,
+            showline: true
+        },
+        yaxis: {
+            title: 'Strike Price ($)',
+            zeroline: true,
+            showline: true
+        },
+        showlegend: true,
+        legend: {
+            x: 1,
+            xanchor: 'right',
+            y: 1
+        },
+        hovermode: 'closest',
+        annotations: [{
+            x: 0.5,
+            y: 1.05,
+            xref: 'paper',
+            yref: 'paper',
+            text: `Current Stock Price: $${spot_price.toFixed(2)}`,
+            showarrow: false
+        }]
+    };
+
+    Plotly.newPlot('plotArea', traces, layout);
 }
 
 function createPriceMatrix(data, expiries, strikes, priceType) {
@@ -103,16 +150,21 @@ function createPriceMatrix(data, expiries, strikes, priceType) {
     return matrix;
 }
 
-// Create plot areas on load
+// Initialize on load
 window.onload = function() {
-    const plotArea = document.getElementById('plotArea');
-    for (let i = 0; i < 3; i++) {
-        const div = document.createElement('div');
-        div.id = `plotArea${i}`;
-        div.style.width = '100%';
-        div.style.height = '400px';
-        plotArea.appendChild(div);
-    }
     // Fetch initial data for NVDA
     fetchData();
+
+    // Add event listener for plot type changes
+    document.getElementById('plotType').addEventListener('change', () => {
+        const data = window._lastData;
+        if (data) {
+            createPlots(data);
+        }
+    });
 };
+
+// Store the last fetched data for plot type changes
+function storeLastData(data) {
+    window._lastData = data;
+}
